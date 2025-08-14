@@ -1,14 +1,20 @@
-import os, json, orjson
+import os, json, orjson,glob
 from typing import Optional
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException,UploadFile,File
 from fastapi.middleware.cors import CORSMiddleware
 from groq import Groq  # NEW
 from utils.rules import suggest_from_rules, extract_json_block
+from fastapi.staticfiles import StaticFiles
+from utils.storage import save_file, ALLOW_MIME
+
 
 
 load_dotenv()
+
+
+
 
 ALLOWED_ORIGINS = [
     "http://localhost:5173",
@@ -24,6 +30,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
+MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "10"))
+MAX_BYTES = MAX_UPLOAD_MB * 1024 * 1024
+
+# dev convenience: serve uploaded files for quick checks
+if os.getenv("SERVE_UPLOADS", "true").lower() == "true":
+    app.mount("/_uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+
 
 
 @app.get("/")
@@ -102,3 +118,36 @@ def chat(req: ChatRequest):
             structured = None
 
     return {"reply": text, "structured": structured, "from_rules": bool(rules_hit), "model": GROQ_MODEL}
+
+
+
+@app.post("/upload")
+async def upload(file: UploadFile = File(...)):
+    """
+    Accepts PDF/JPG/PNG. Saves to UPLOAD_DIR with a UUID filename.
+    Returns metadata including file_id, mime, size, sha256.
+    """
+    try:
+        meta = await save_file(file, UPLOAD_DIR, MAX_BYTES)
+        return {"ok": True, "file": meta}
+    except ValueError as e:
+        # validation or size errors
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Upload failed: {e}")
+
+
+@app.get("/files/{file_id}/meta")
+def file_meta(file_id: str):
+    """
+    Returns metadata for an uploaded file. (Reads the sidecar JSON.)
+    """
+    pattern = os.path.join(UPLOAD_DIR, f"{file_id}.*.json")
+    matches = glob.glob(pattern)
+    if not matches:
+        raise HTTPException(status_code=404, detail="File not found")
+    try:
+        with open(matches[0], "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Meta read failed: {e}")

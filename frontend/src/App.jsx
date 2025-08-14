@@ -48,6 +48,85 @@ function nowTime() {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+
+
+
+
+function UploadPanel({ API_BASE }) {
+  const [file, setFile] = useState(null);
+  const [progress, setProgress] = useState(0);
+  const [result, setResult] = useState(null);
+  const [err, setErr] = useState("");
+
+  const onPick = (e) => {
+    setFile(e.target.files?.[0] || null);
+    setResult(null);
+    setErr("");
+    setProgress(0);
+  };
+
+  const upload = async () => {
+    if (!file) return;
+    setErr(""); setResult(null); setProgress(0);
+
+    const form = new FormData();
+    form.append("file", file);
+
+    try {
+      const res = await axios.post(`${API_BASE}/upload`, form, {
+        headers: { "Content-Type": "multipart/form-data" },
+        onUploadProgress: (pe) => {
+          if (pe.total) setProgress(Math.round((pe.loaded / pe.total) * 100));
+        },
+      });
+      setResult(res.data.file);
+    } catch (e) {
+      setErr(e?.response?.data?.detail || e.message);
+    }
+  };
+
+  return (
+    <div style={{ borderTop: "1px solid #e5e7eb", marginTop: 16, paddingTop: 12 }}>
+      <h3>Upload Health Report (Stub)</h3>
+      <input
+        type="file"
+        accept=".pdf,.png,.jpg,.jpeg"
+        onChange={onPick}
+        style={{ display: "block", marginBottom: 8 }}
+      />
+      <button onClick={upload} disabled={!file} style={{ padding: "8px 12px" }}>Upload</button>
+
+      {progress > 0 && progress < 100 && (
+        <div style={{ marginTop: 8, height: 8, background: "#eef2ff", borderRadius: 4 }}>
+          <div style={{ width: `${progress}%`, height: 8, background: "#6366f1", borderRadius: 4 }} />
+        </div>
+      )}
+
+      {result && (
+        <div style={{ marginTop: 12, fontSize: 14 }}>
+          <div><b>File ID:</b> {result.file_id}</div>
+          <div><b>Type:</b> {result.mime}</div>
+          <div><b>Size:</b> {(result.size_bytes/1024).toFixed(1)} KB</div>
+          <div><b>SHA-256:</b> <code style={{ fontSize: 12 }}>{result.sha256.slice(0,24)}...</code></div>
+          {/* Dev-only: direct link if you mounted /_uploads */}
+          <div style={{ marginTop: 6 }}>
+            <a href={`${API_BASE}/_uploads/${result.stored_filename}`} target="_blank" rel="noreferrer">
+              Open stored file (dev)
+            </a>
+          </div>
+        </div>
+      )}
+
+      {err && <div style={{ color: "crimson", marginTop: 8 }}>Error: {err}</div>}
+
+      <div style={{ color: "#6b7280", fontSize: 12, marginTop: 8 }}>
+        * MVP note: files are stored locally and not parsed yet.
+      </div>
+    </div>
+  );
+}
+
+
 export default function App() {
   const [health, setHealth] = useState(null);
   const [input, setInput] = useState("");
@@ -213,6 +292,8 @@ export default function App() {
           <div style={{ fontSize: 12, color: "#6b7280", marginTop: 12 }}>
             * We store this locally in your browser for the MVP.
           </div>
+
+          <UploadPanel API_BASE={API_BASE} />
         </aside>
       </div>
     </main>
