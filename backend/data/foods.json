@@ -1,0 +1,12 @@
+{
+  "migraine": {
+    "eat": ["oatmeal", "banana", "ginger tea", "leafy greens"],
+    "avoid": ["aged cheese", "processed meats", "alcohol", "aspartame"],
+    "timing": ["Small, frequent meals", "Hydrate throughout the day"]
+  },
+  "type2_diabetes": {
+    "eat": ["non-starchy vegetables", "legumes", "oats", "nuts"],
+    "avoid": ["sugary drinks", "refined carbs"],
+    "timing": ["Evenly spaced meals", "Low-GI breakfast"]
+  }
+}
