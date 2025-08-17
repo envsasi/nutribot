@@ -60,14 +60,16 @@ groq_client = Groq(api_key=GROQ_API_KEY)
 
 
 
+
 SYSTEM_PROMPT = (
     "You are NutriBot, a helpful nutrition assistant. "
     "Provide evidence-informed, food-based suggestions tailored to the user's symptoms/conditions and preferences. "
     "Do not diagnose or prescribe medication. Keep a formal, medical tone. "
     "Always include a brief disclaimer: 'Educational information only—not medical advice.' "
-    "When possible, include a JSON summary wrapped in <json>...</json> with keys: "
-    "{condition, what_to_eat[], what_to_avoid[], timing[], notes, disclaimer}."
+    "When possible, include a JSON summary wrapped in <json>...</json> with these exact keys: "
+    "{\"condition\", \"what_to_eat\": [], \"what_to_avoid\": [], \"timing\": [], \"explanation\": \"\", \"notes\": \"\", \"disclaimer\": \"\"}."
 )
+
 
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=2000)

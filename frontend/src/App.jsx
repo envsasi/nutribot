@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
+import SuggestionCard from './SuggestionCard';
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
 
@@ -173,24 +174,21 @@ export default function App() {
       preferences: (profile.preferences || "").split(",").map(s => s.trim()).filter(Boolean),
       conditions: (profile.conditions || "").split(",").map(s => s.trim()).filter(Boolean),
     };
+try {
+      const res = await axios.post(`${API_BASE}/chat`, {
+        message: text,
+        profile: profilePayload,
+      });
 
-    try {
-      const res = await axios.post(`${API_BASE}/chat`, { message: text, profile: profilePayload });
-      const reply = res.data?.reply || "No reply";
-      const structured = res.data?.structured || null;
+      // Create a new message object for the bot's reply
+      const botMessage = {
+        role: 'assistant',
+        content: res.data?.reply || 'Sorry, I encountered an issue.',
+        structured: res.data?.structured || null, // <-- We now store the structured object directly
+        time: nowTime(),
+      };
 
-      let pretty = reply;
-      if (structured) {
-        const lines = [];
-        if (structured.what_to_eat?.length) lines.push(`\nWhat to eat: ${structured.what_to_eat.join(", ")}`);
-        if (structured.what_to_avoid?.length) lines.push(`What to avoid: ${structured.what_to_avoid.join(", ")}`);
-        if (structured.timing?.length) lines.push(`Timing: ${structured.timing.join(" | ")}`);
-        if (structured.notes) lines.push(`Notes: ${structured.notes}`);
-        if (structured.disclaimer) lines.push(`\n${structured.disclaimer}`);
-        pretty = reply + "\n" + lines.join("\n");
-      }
-
-      setMessages(prev => [...prev, { role: "assistant", content: pretty.trim(), time: nowTime() }]);
+      setMessages(prev => [...prev, botMessage]);
     } catch (e) {
       setErr(e?.response?.data?.detail || e.message);
       setMessages(prev => [...prev, { role: "assistant", content: "Sorry—something went wrong. Please try again.", time: nowTime() }]);
@@ -223,7 +221,17 @@ export default function App() {
                 Ask anything like: “What foods are good for migraine?” or “Type 2 diabetes breakfast ideas”.
               </div>
             )}
-            {messages.map((m, i) => <Bubble key={i} role={m.role} time={m.time}>{m.content}</Bubble>)}
+            {messages.map((m, i) => (
+              <div key={i}>
+                <Bubble role={m.role} time={m.time}>
+                  {m.content}
+                </Bubble>
+                {/* If the message is from the bot AND has structured data, show the card */}
+                {m.role === 'assistant' && m.structured && (
+                  <SuggestionCard data={m.structured} />
+                )}
+              </div>
+            ))}
             {loading && <Typing />}
             <div ref={endRef} />
           </div>
