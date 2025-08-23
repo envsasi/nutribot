@@ -12,17 +12,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from groq import Groq
 from fastapi.staticfiles import StaticFiles
 import fitz
-
+import google.generativeai as genai
 # CORRECTED: Use relative imports with a leading dot (.)
 from .utils.rules import suggest_from_rules, extract_json_block
 from .utils.storage import save_file
-from .vision.utils import identify_food_from_image
+from .vision.utils import identify_food_from_image_gemini
 
 # --- CONFIGURATION & APP INITIALIZATION ---
 
 # CORRECTED: Build absolute paths to ensure files are found correctly
 APP_ROOT = pathlib.Path(__file__).parent
 load_dotenv(dotenv_path=APP_ROOT / ".env")
+
+try:
+    genai.configure(api_key=os.getenv("GOOGLE_API_KEY")) # <-- ADD THIS LINE
+except Exception as e:
+    print(f"--- WARNING: Failed to configure Google AI: {e} ---")
 
 ALLOWED_ORIGINS_STR = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
 ALLOWED_ORIGINS = [origin.strip() for origin in ALLOWED_ORIGINS_STR.split(",")]
@@ -53,6 +58,12 @@ class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=2000)
     profile: Optional[dict] = None
     report_text: Optional[str] = None
+
+class ChatWithImageRequest(BaseModel):
+    message: str
+    profile: Optional[dict] = None
+    report_text: Optional[str] = None
+    image_data_url: Optional[str] = None
 
 class ImageAnalysisRequest(BaseModel):
     image_data_url: str
@@ -108,6 +119,37 @@ The JSON object must use this exact schema:
 }}
 """
 
+PROMPT_TEMPLATE_VISION = """
+You are NutriBot, an expert nutrition assistant. Your goal is to provide a detailed and personalized analysis of a specific food item based on an image the user has provided and their health profile.
+
+**Primary Goal:** Analyze the identified food item and the user's question about it in the context of their health profile. Provide a clear recommendation on whether they should eat it and why.
+
+**Safety Rules:**
+1. DO NOT diagnose any medical condition.
+2. DO NOT prescribe medication.
+3. You MUST include the standard disclaimer.
+
+**Analysis Context:**
+- Identified Food Item: "{identified_food}"
+- User's Question: "{user_message}"
+- User's Profile: {user_profile}
+- Health Report Context: "{report_text}"
+
+Based on all the information above, generate a personalized food recommendation.
+Your final output MUST be a single, valid JSON object and nothing else.
+The JSON object must use this exact schema:
+{{
+  "condition_detected": "The user's primary health condition you are analyzing in relation to the food (e.g., 'Type 2 Diabetes')",
+  "foods_to_eat": {{
+    "main_suggestions": ["Confirm the analyzed food if it's beneficial and briefly explain why, e.g., 'Apple (Good source of soluble fiber, which helps manage blood sugar)'"],
+    "alternatives": ["A list of 2-3 other beneficial foods with similar properties"]
+  }},
+  "foods_to_avoid": ["A single, comprehensive list of 5-7 foods to avoid for the user's condition"],
+  "timing_and_tips": ["A list of 2-3 practical tips related to eating this specific food or managing the condition"],
+  "explanation": "A detailed, 2-3 sentence explanation addressing the user's specific question about the food in relation to their health profile.",
+  "disclaimer": "This is for informational purposes only and is not medical advice. Please consult a healthcare professional for any health concerns."
+}}
+"""
 
 @app.post("/chat", tags=["NutriBot"])
 def chat(req: ChatRequest):
@@ -149,10 +191,44 @@ def chat(req: ChatRequest):
         raise HTTPException(status_code=502, detail=f"AI generation error: {str(e)}")
 
 
+@app.post("/chat-with-image", tags=["NutriBot"])
+def chat_with_image(req: ChatWithImageRequest):
+    # Step 1: Identify the food from the image
+    identified_food = identify_food_from_image_gemini(req.image_data_url)
+
+    if "unknown food item" in identified_food:
+         return {"reply": "Sorry, I couldn't identify the food in the image. Please try again with a clearer picture.", "structured": None, "from_rules": False}
+
+    # Step 2: Format the new, specialized vision prompt
+    final_prompt = PROMPT_TEMPLATE_VISION.format(
+        identified_food=identified_food,
+        user_message=req.message or "Is this food good for me?",
+        user_profile=json.dumps(req.profile),
+        report_text=req.report_text or "Not provided."
+    )
+
+    try:
+        # Step 3: Call the LLM with the new prompt
+        comp = groq_client.chat.completions.create(
+            model=GROQ_MODEL,
+            messages=[{"role": "user", "content": final_prompt}],
+            temperature=0.3,
+            response_format={"type": "json_object"},
+        )
+
+        response_text = comp.choices[0].message.content
+        structured_response = json.loads(response_text)
+
+        simple_reply = f"Here is an analysis of the '{identified_food}' based on your profile."
+
+        return {"reply": simple_reply, "structured": structured_response, "from_rules": False}
+
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"AI generation error: {str(e)}")
 @app.post("/analyze-food-image", tags=["NutriBot"])
 def analyze_food_image(req: ImageAnalysisRequest):
     # Step 1: Identify the food from the image using the vision model
-    identified_food = identify_food_from_image(groq_client, req.image_data_url)
+    identified_food = identify_food_from_image_gemini(req.image_data_url)
 
     # Step 2: Create a new, specific query for our chat logic
     new_message = f"Based on my health profile, can I eat this food item: {identified_food}?"
@@ -214,18 +290,5 @@ async def file_meta(file_id: str):
         raise HTTPException(status_code=500, detail=f"Meta read failed: {e}")
 
 
-@app.post("/test-vision", tags=["Debug"])
-async def test_vision(req: ImageAnalysisRequest):
-    """
-    A temporary endpoint to only test the image recognition part.
-    """
-    print("--- Vision test endpoint called ---")
-    try:
-        food_name = identify_food_from_image(groq_client, req.image_data_url)
-        print(f"Vision model identified: {food_name}")
-        return {"identified_food": food_name}
-    except Exception as e:
-        print(f"An error occurred in the vision test: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 if os.getenv("SERVE_UPLOADS", "true").lower() == "true":
     app.mount("/_uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")

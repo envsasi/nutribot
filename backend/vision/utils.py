@@ -1,36 +1,28 @@
-from groq import Groq
+import os
+import google.generativeai as genai
+from PIL import Image
+import io
+import base64
 
-def identify_food_from_image(client: Groq, image_data_url: str) -> str:
-    """
-    Uses a multimodal LLM to identify the food item in a base64 encoded image.
-    """
-    # The image data URL is in the format "data:image/jpeg;base64,..."
-    # We only need the full data URL for the API call.
 
+def identify_food_from_image_gemini(image_data_url: str) -> str:
+    """
+    Uses Google's Gemini 1.5 Flash model to identify a food item.
+    """
     try:
-        chat_completion = client.chat.completions.create(
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": "Identify the primary food item in this image. Respond with only the name of the food (e.g., 'Apple', 'Banana', 'Slice of Pizza'). If you are unsure, say 'unknown food item'."
-                        },
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": image_data_url,
-                            },
-                        },
-                    ],
-                }
-            ],
-            # A powerful model is needed for vision. Llama 3.1 is a great choice.
-            model="llama-3.1-70b-versatile",
-        )
-        food_name = chat_completion.choices[0].message.content.strip()
+        image_data = base64.b64decode(image_data_url.split(",")[1])
+        img = Image.open(io.BytesIO(image_data))
+
+        model = genai.GenerativeModel('gemini-1.5-flash')
+
+        prompt = "Identify the primary food item in this image. Respond with only the name of the food (e.g., 'Apple', 'Banana', 'Slice of Pizza'). If you are unsure, say 'unknown food item'."
+
+        response = model.generate_content([prompt, img])
+
+        food_name = response.text.strip()
+        print(f"--- DEBUG: Gemini Vision identified: {food_name} ---")
         return food_name if food_name else "an unknown food item"
+
     except Exception as e:
-        print(f"Error identifying food: {e}")
+        print(f"--- DEBUG: An error occurred in the Gemini API call: {e} ---")
         return "an unknown food item"

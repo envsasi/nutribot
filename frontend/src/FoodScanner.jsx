@@ -1,56 +1,59 @@
-import React, { useRef, useCallback, useState } from 'react';
+import React, { useRef, useCallback } from 'react';
 import Webcam from 'react-webcam';
+import Modal from 'react-modal';
 
 const videoConstraints = {
-  width: 350,
-  height: 350,
+  width: 500,
+  height: 500,
   facingMode: "environment"
 };
 
-export default function FoodScanner({ onCapture, isProcessing }) {
+const customStyles = {
+  content: {
+    top: '50%',
+    left: '50%',
+    right: 'auto',
+    bottom: 'auto',
+    marginRight: '-50%',
+    transform: 'translate(-50%, -50%)',
+    padding: '20px',
+    border: '1px solid #ccc',
+    borderRadius: '10px',
+  },
+};
+
+// Required for accessibility
+Modal.setAppElement('#root');
+
+export default function FoodScanner({ isOpen, onRequestClose, onCapture }) {
   const webcamRef = useRef(null);
-  const [imgSrc, setImgSrc] = useState(null);
 
   const capture = useCallback(() => {
-    if (isProcessing) return;
     const imageSrc = webcamRef.current.getScreenshot();
-    setImgSrc(imageSrc);
     onCapture(imageSrc);
-  }, [webcamRef, setImgSrc, onCapture, isProcessing]);
-
-  const clearImage = () => {
-    setImgSrc(null);
-    onCapture(null);
-  };
+    onRequestClose(); // Close the modal after capturing
+  }, [webcamRef, onCapture, onRequestClose]);
 
   return (
-    <div style={{ marginTop: '16px', borderTop: '1px solid #e5e7eb', paddingTop: '12px' }}>
-      <h3 style={{ marginTop: 0 }}>Scan a Food Item</h3>
-      <div style={{ borderRadius: '8px', overflow: 'hidden', width: '350px', height: '350px', background: '#ccc' }}>
-        {imgSrc ? (
-          <img src={imgSrc} alt="Captured food" />
-        ) : (
-          <Webcam
-            audio={false}
-            ref={webcamRef}
-            screenshotFormat="image/jpeg"
-            width={350}
-            height={350}
-            videoConstraints={videoConstraints}
-          />
-        )}
+    <Modal
+      isOpen={isOpen}
+      onRequestClose={onRequestClose}
+      style={customStyles}
+      contentLabel="Food Scanner Camera"
+    >
+      <div style={{ textAlign: 'center' }}>
+        <Webcam
+          audio={false}
+          ref={webcamRef}
+          screenshotFormat="image/jpeg"
+          width={500}
+          height={500}
+          videoConstraints={videoConstraints}
+        />
+        <button onClick={capture} style={{ padding: '10px 20px', marginTop: '15px', fontSize: '16px' }}>
+          Take Picture
+        </button>
       </div>
-      <div style={{ marginTop: '8px' }}>
-        {imgSrc ? (
-           <button onClick={clearImage} disabled={isProcessing} style={{ padding: '8px 12px' }}>
-            Retake Picture
-          </button>
-        ) : (
-          <button onClick={capture} disabled={isProcessing} style={{ padding: '8px 12px' }}>
-            Capture Picture
-          </button>
-        )}
-      </div>
-    </div>
+    </Modal>
   );
 }
