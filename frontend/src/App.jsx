@@ -4,6 +4,7 @@ import SuggestionCard from './SuggestionCard';
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
 
+
 function Bubble({ role, children, time }) {
   const isUser = role === "user";
   return (
@@ -53,15 +54,22 @@ function nowTime() {
 
 
 
-function UploadPanel({ API_BASE }) {
+function UploadPanel({ API_BASE, onAnalysisComplete }) {
   const [file, setFile] = useState(null);
   const [progress, setProgress] = useState(0);
   const [result, setResult] = useState(null);
   const [err, setErr] = useState("");
 
+  // New state for the parsing process
+  const [isParsing, setIsParsing] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState(null);
+
+
   const onPick = (e) => {
     setFile(e.target.files?.[0] || null);
     setResult(null);
+    setAnalysisResult(null); // Reset analysis on new file pick
+    onAnalysisComplete("");   // Clear context in parent
     setErr("");
     setProgress(0);
   };
@@ -69,10 +77,8 @@ function UploadPanel({ API_BASE }) {
   const upload = async () => {
     if (!file) return;
     setErr(""); setResult(null); setProgress(0);
-
     const form = new FormData();
     form.append("file", file);
-
     try {
       const res = await axios.post(`${API_BASE}/upload`, form, {
         headers: { "Content-Type": "multipart/form-data" },
@@ -86,53 +92,60 @@ function UploadPanel({ API_BASE }) {
     }
   };
 
+  // New function to handle parsing
+  const handleParse = async () => {
+    if (!result?.file_id) return;
+    setIsParsing(true);
+    setErr("");
+    try {
+        const res = await axios.post(`${API_BASE}/files/${result.file_id}/parse`);
+        const summary = `Analyzed report: ${result.original_filename}. The AI will now use this context.`;
+        setAnalysisResult(summary);
+        // Lift the state up to the App component
+        onAnalysisComplete(res.data.content);
+    } catch (e) {
+        setErr(e?.response?.data?.detail || "Failed to parse file.");
+    } finally {
+        setIsParsing(false);
+    }
+  };
+
   return (
     <div style={{ borderTop: "1px solid #e5e7eb", marginTop: 16, paddingTop: 12 }}>
-      <h3>Upload Health Report (Stub)</h3>
-      <input
-        type="file"
-        accept=".pdf,.png,.jpg,.jpeg"
-        onChange={onPick}
-        style={{ display: "block", marginBottom: 8 }}
-      />
-      <button onClick={upload} disabled={!file} style={{ padding: "8px 12px" }}>Upload</button>
+      <h3>Upload Health Report</h3>
+      <input type="file" accept=".pdf" onChange={onPick} style={{ display: "block", marginBottom: 8 }} />
+      <button onClick={upload} disabled={!file || result} style={{ padding: "8px 12px" }}>
+        {progress > 0 && progress < 100 ? `Uploading... ${progress}%` : "1. Upload File"}
+      </button>
 
-      {progress > 0 && progress < 100 && (
-        <div style={{ marginTop: 8, height: 8, background: "#eef2ff", borderRadius: 4 }}>
-          <div style={{ width: `${progress}%`, height: 8, background: "#6366f1", borderRadius: 4 }} />
+      {result && !analysisResult && (
+        <div style={{ marginTop: '8px' }}>
+            <div style={{fontSize: 13, color: 'green', marginBottom: '8px'}}>Upload successful! Ready to analyze.</div>
+            <button onClick={handleParse} disabled={isParsing} style={{ padding: "8px 12px" }}>
+                {isParsing ? "Analyzing..." : "2. Analyze for Context"}
+            </button>
         </div>
       )}
 
-      {result && (
-        <div style={{ marginTop: 12, fontSize: 14 }}>
-          <div><b>File ID:</b> {result.file_id}</div>
-          <div><b>Type:</b> {result.mime}</div>
-          <div><b>Size:</b> {(result.size_bytes/1024).toFixed(1)} KB</div>
-          <div><b>SHA-256:</b> <code style={{ fontSize: 12 }}>{result.sha256.slice(0,24)}...</code></div>
-          {/* Dev-only: direct link if you mounted /_uploads */}
-          <div style={{ marginTop: 6 }}>
-            <a href={`${API_BASE}/_uploads/${result.stored_filename}`} target="_blank" rel="noreferrer">
-              Open stored file (dev)
-            </a>
-          </div>
-        </div>
-      )}
+      {analysisResult && <div style={{marginTop: '12px', padding: '8px', background: '#eef2ff', borderRadius: '8px', fontSize: '13px'}}>{analysisResult}</div>}
 
       {err && <div style={{ color: "crimson", marginTop: 8 }}>Error: {err}</div>}
 
       <div style={{ color: "#6b7280", fontSize: 12, marginTop: 8 }}>
-        * MVP note: files are stored locally and not parsed yet.
+        * Analysis will provide context for your next chat messages.
       </div>
     </div>
   );
 }
-
 
 export default function App() {
   const [health, setHealth] = useState(null);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
+  const [reportContext, setReportContext] = useState("");
+
+
   const [messages, setMessages] = useState(() => {
     try {
       const saved = localStorage.getItem("nb_messages");
@@ -176,9 +189,10 @@ export default function App() {
     };
 try {
       const res = await axios.post(`${API_BASE}/chat`, {
-        message: text,
-        profile: profilePayload,
-      });
+    message: text,
+    profile: profilePayload,
+    report_text: reportContext, // <-- ADD THIS
+        });
 
       // Create a new message object for the bot's reply
       const botMessage = {
@@ -190,9 +204,7 @@ try {
 
       setMessages(prev => [...prev, botMessage]);
     } catch (e) {
-      setErr(e?.response?.data?.detail || e.message);
-      setMessages(prev => [...prev, { role: "assistant", content: "Sorry—something went wrong. Please try again.", time: nowTime() }]);
-    } finally {
+setMessages(prev => [...prev, { role: "assistant", content: `Sorry, an error occurred: ${e?.response?.data?.detail || e.message}`, time: nowTime() }]);    } finally {
       setLoading(false);
     }
   }
@@ -301,7 +313,7 @@ try {
             * We store this locally in your browser for the MVP.
           </div>
 
-          <UploadPanel API_BASE={API_BASE} />
+          <UploadPanel API_BASE={API_BASE} onAnalysisComplete={setReportContext} />
         </aside>
       </div>
     </main>
