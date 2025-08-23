@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import SuggestionCard from './SuggestionCard';
+import FoodScanner from './FoodScanner';
+import UploadPanel from './UploadPanel';
 
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
+
+const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000";
 
 
 function Bubble({ role, children, time }) {
@@ -50,101 +53,12 @@ function nowTime() {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-
-
-
-
-function UploadPanel({ API_BASE, onAnalysisComplete }) {
-  const [file, setFile] = useState(null);
-  const [progress, setProgress] = useState(0);
-  const [result, setResult] = useState(null);
-  const [err, setErr] = useState("");
-
-  // New state for the parsing process
-  const [isParsing, setIsParsing] = useState(false);
-  const [analysisResult, setAnalysisResult] = useState(null);
-
-
-  const onPick = (e) => {
-    setFile(e.target.files?.[0] || null);
-    setResult(null);
-    setAnalysisResult(null); // Reset analysis on new file pick
-    onAnalysisComplete("");   // Clear context in parent
-    setErr("");
-    setProgress(0);
-  };
-
-  const upload = async () => {
-    if (!file) return;
-    setErr(""); setResult(null); setProgress(0);
-    const form = new FormData();
-    form.append("file", file);
-    try {
-      const res = await axios.post(`${API_BASE}/upload`, form, {
-        headers: { "Content-Type": "multipart/form-data" },
-        onUploadProgress: (pe) => {
-          if (pe.total) setProgress(Math.round((pe.loaded / pe.total) * 100));
-        },
-      });
-      setResult(res.data.file);
-    } catch (e) {
-      setErr(e?.response?.data?.detail || e.message);
-    }
-  };
-
-  // New function to handle parsing
-  const handleParse = async () => {
-    if (!result?.file_id) return;
-    setIsParsing(true);
-    setErr("");
-    try {
-        const res = await axios.post(`${API_BASE}/files/${result.file_id}/parse`);
-        const summary = `Analyzed report: ${result.original_filename}. The AI will now use this context.`;
-        setAnalysisResult(summary);
-        // Lift the state up to the App component
-        onAnalysisComplete(res.data.content);
-    } catch (e) {
-        setErr(e?.response?.data?.detail || "Failed to parse file.");
-    } finally {
-        setIsParsing(false);
-    }
-  };
-
-  return (
-    <div style={{ borderTop: "1px solid #e5e7eb", marginTop: 16, paddingTop: 12 }}>
-      <h3>Upload Health Report</h3>
-      <input type="file" accept=".pdf" onChange={onPick} style={{ display: "block", marginBottom: 8 }} />
-      <button onClick={upload} disabled={!file || result} style={{ padding: "8px 12px" }}>
-        {progress > 0 && progress < 100 ? `Uploading... ${progress}%` : "1. Upload File"}
-      </button>
-
-      {result && !analysisResult && (
-        <div style={{ marginTop: '8px' }}>
-            <div style={{fontSize: 13, color: 'green', marginBottom: '8px'}}>Upload successful! Ready to analyze.</div>
-            <button onClick={handleParse} disabled={isParsing} style={{ padding: "8px 12px" }}>
-                {isParsing ? "Analyzing..." : "2. Analyze for Context"}
-            </button>
-        </div>
-      )}
-
-      {analysisResult && <div style={{marginTop: '12px', padding: '8px', background: '#eef2ff', borderRadius: '8px', fontSize: '13px'}}>{analysisResult}</div>}
-
-      {err && <div style={{ color: "crimson", marginTop: 8 }}>Error: {err}</div>}
-
-      <div style={{ color: "#6b7280", fontSize: 12, marginTop: 8 }}>
-        * Analysis will provide context for your next chat messages.
-      </div>
-    </div>
-  );
-}
-
 export default function App() {
   const [health, setHealth] = useState(null);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const [reportContext, setReportContext] = useState("");
-
 
   const [messages, setMessages] = useState(() => {
     try {
@@ -171,43 +85,84 @@ export default function App() {
 
   const canSend = useMemo(() => input.trim().length > 0 && !loading, [input, loading]);
 
+  const profilePayload = useMemo(() => ({
+    age: profile.age || undefined,
+    restrictions: (profile.restrictions || "").split(",").map(s => s.trim()).filter(Boolean),
+    preferences: (profile.preferences || "").split(",").map(s => s.trim()).filter(Boolean),
+    conditions: (profile.conditions || "").split(",").map(s => s.trim()).filter(Boolean),
+  }), [profile]);
+
   async function send() {
     const text = input.trim();
     if (!text) return;
-    setErr(""); setLoading(true);
+    setErr("");
+    setLoading(true);
 
-    // 1) Add user message
     setMessages(prev => [...prev, { role: "user", content: text, time: nowTime() }]);
     setInput("");
 
-    // 2) Build the profile object in a simple JSON shape for backend
-    const profilePayload = {
+    try {
+      const res = await axios.post(`${API_BASE}/chat`, {
+        message: text,
+        profile: profilePayload,
+        report_text: reportContext,
+      });
+
+      const botMessage = {
+        role: 'assistant',
+        content: res.data?.reply || 'Sorry, I encountered an issue.',
+        structured: res.data?.structured || null,
+        time: nowTime(),
+      };
+      setMessages(prev => [...prev, botMessage]);
+    } catch (e) {
+      setMessages(prev => [...prev, { role: "assistant", content: `Sorry, an error occurred: ${e?.response?.data?.detail || e.message}`, time: nowTime() }]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // NEW: This function now contains the full logic to call the backend
+const handleCapture = async (imageData) => {
+  // Do nothing if the 'Retake' button was clicked which sends null
+  if (!imageData) {
+    return;
+  }
+
+  setErr("");
+  setLoading(true);
+  // Add a placeholder message to the chat UI
+  setMessages(prev => [...prev, { role: "user", content: "📷 Analyzing Scanned Food...", time: nowTime() }]);
+
+  const profilePayload = {
       age: profile.age || undefined,
       restrictions: (profile.restrictions || "").split(",").map(s => s.trim()).filter(Boolean),
       preferences: (profile.preferences || "").split(",").map(s => s.trim()).filter(Boolean),
       conditions: (profile.conditions || "").split(",").map(s => s.trim()).filter(Boolean),
     };
-try {
-      const res = await axios.post(`${API_BASE}/chat`, {
-    message: text,
-    profile: profilePayload,
-    report_text: reportContext, // <-- ADD THIS
-        });
+  try {
+    // Send the image data and profile to the new backend endpoint
+    const res = await axios.post(`${API_BASE}/analyze-food-image`, {
+      image_data_url: imageData,
+      profile: profilePayload,
+      report_text: reportContext,
+    });
 
-      // Create a new message object for the bot's reply
-      const botMessage = {
-        role: 'assistant',
-        content: res.data?.reply || 'Sorry, I encountered an issue.',
-        structured: res.data?.structured || null, // <-- We now store the structured object directly
-        time: nowTime(),
-      };
+    // The response format is the same as the chat endpoint, so we can reuse the logic
+    const botMessage = {
+      role: 'assistant',
+      content: res.data?.reply || 'Sorry, I encountered an issue analyzing the image.',
+      structured: res.data?.structured || null,
+      time: nowTime(),
+    };
+    setMessages(prev => [...prev, botMessage]);
 
-      setMessages(prev => [...prev, botMessage]);
-    } catch (e) {
-setMessages(prev => [...prev, { role: "assistant", content: `Sorry, an error occurred: ${e?.response?.data?.detail || e.message}`, time: nowTime() }]);    } finally {
-      setLoading(false);
-    }
+  } catch (e) {
+    setMessages(prev => [...prev, { role: "assistant", content: `Sorry, an error occurred: ${e?.response?.data?.detail || e.message}`, time: nowTime() }]);
+  } finally {
+    setLoading(false);
   }
+};
 
   function onKeyDown(e) {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -223,25 +178,14 @@ setMessages(prev => [...prev, { role: "assistant", content: `Sorry, an error occ
         <small>Backend: {health ? "OK" : (err || "checking…")}</small>
       </header>
 
-      {/* Layout: left chat, right profile */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: 16 }}>
         {/* Chat column */}
-        <section style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, height: "70vh", display: "flex", flexDirection: "column" }}>
+        <section style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, height: "80vh", display: "flex", flexDirection: "column" }}>
           <div style={{ overflowY: "auto", padding: "6px 6px 0 6px", flex: 1 }}>
-            {messages.length === 0 && (
-              <div style={{ color: "#6b7280", fontSize: 14, margin: "8px 0 14px" }}>
-                Ask anything like: “What foods are good for migraine?” or “Type 2 diabetes breakfast ideas”.
-              </div>
-            )}
             {messages.map((m, i) => (
               <div key={i}>
-                <Bubble role={m.role} time={m.time}>
-                  {m.content}
-                </Bubble>
-                {/* If the message is from the bot AND has structured data, show the card */}
-                {m.role === 'assistant' && m.structured && (
-                  <SuggestionCard data={m.structured} />
-                )}
+                <Bubble role={m.role} time={m.time}>{m.content}</Bubble>
+                {m.role === 'assistant' && m.structured && (<SuggestionCard data={m.structured} />)}
               </div>
             ))}
             {loading && <Typing />}
@@ -252,7 +196,7 @@ setMessages(prev => [...prev, { role: "assistant", content: `Sorry, an error occ
             <textarea
               rows={3}
               style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid #e5e7eb" }}
-              placeholder="Type a message… (Enter to send, Shift+Enter for new line)"
+              placeholder="Type a message…"
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={onKeyDown}
@@ -268,52 +212,24 @@ setMessages(prev => [...prev, { role: "assistant", content: `Sorry, an error occ
         </section>
 
         {/* Profile column */}
-        <aside style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, height: "70vh", overflowY: "auto" }}>
+        <aside style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, height: "80vh", overflowY: "auto" }}>
           <h3 style={{ marginTop: 0 }}>Your Profile</h3>
           <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 10 }}>
             Personalization helps NutriBot tailor eat/avoid lists.
           </div>
-
           <label>Age</label>
-          <input
-            type="number"
-            value={profile.age}
-            onChange={e => setProfile(p => ({ ...p, age: e.target.value }))}
-            style={{ width: "100%", padding: 8, marginBottom: 10, borderRadius: 8, border: "1px solid #e5e7eb" }}
-          />
-
+          <input type="number" value={profile.age} onChange={e => setProfile(p => ({ ...p, age: e.target.value }))} style={{ width: "100%", padding: 8, marginBottom: 10, borderRadius: 8, border: "1px solid #e5e7eb" }} />
           <label>Diet preferences (comma separated)</label>
-          <input
-            type="text"
-            value={profile.preferences}
-            placeholder="e.g., vegetarian, high-protein"
-            onChange={e => setProfile(p => ({ ...p, preferences: e.target.value }))}
-            style={{ width: "100%", padding: 8, marginBottom: 10, borderRadius: 8, border: "1px solid #e5e7eb" }}
-          />
-
+          <input type="text" value={profile.preferences} placeholder="e.g., vegetarian, high-protein" onChange={e => setProfile(p => ({ ...p, preferences: e.target.value }))} style={{ width: "100%", padding: 8, marginBottom: 10, borderRadius: 8, border: "1px solid #e5e7eb" }} />
           <label>Restrictions / Allergies (comma separated)</label>
-          <input
-            type="text"
-            value={profile.restrictions}
-            placeholder="e.g., lactose, gluten"
-            onChange={e => setProfile(p => ({ ...p, restrictions: e.target.value }))}
-            style={{ width: "100%", padding: 8, marginBottom: 10, borderRadius: 8, border: "1px solid #e5e7eb" }}
-          />
-
+          <input type="text" value={profile.restrictions} placeholder="e.g., lactose, gluten" onChange={e => setProfile(p => ({ ...p, restrictions: e.target.value }))} style={{ width: "100%", padding: 8, marginBottom: 10, borderRadius: 8, border: "1px solid #e5e7eb" }} />
           <label>Known conditions (comma separated)</label>
-          <input
-            type="text"
-            value={profile.conditions}
-            placeholder="e.g., type 2 diabetes"
-            onChange={e => setProfile(p => ({ ...p, conditions: e.target.value }))}
-            style={{ width: "100%", padding: 8, marginBottom: 10, borderRadius: 8, border: "1px solid #e5e7eb" }}
-          />
-
+          <input type="text" value={profile.conditions} placeholder="e.g., type 2 diabetes" onChange={e => setProfile(p => ({ ...p, conditions: e.target.value }))} style={{ width: "100%", padding: 8, marginBottom: 10, borderRadius: 8, border: "1px solid #e5e7eb" }} />
           <div style={{ fontSize: 12, color: "#6b7280", marginTop: 12 }}>
             * We store this locally in your browser for the MVP.
           </div>
-
           <UploadPanel API_BASE={API_BASE} onAnalysisComplete={setReportContext} />
+          <FoodScanner onCapture={handleCapture} isProcessing={loading} />
         </aside>
       </div>
     </main>

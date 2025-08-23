@@ -16,6 +16,7 @@ import fitz
 # CORRECTED: Use relative imports with a leading dot (.)
 from .utils.rules import suggest_from_rules, extract_json_block
 from .utils.storage import save_file
+from .vision.utils import identify_food_from_image
 
 # --- CONFIGURATION & APP INITIALIZATION ---
 
@@ -50,6 +51,11 @@ groq_client = Groq(api_key=GROQ_API_KEY)
 # --- DATA MODELS ---
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=2000)
+    profile: Optional[dict] = None
+    report_text: Optional[str] = None
+
+class ImageAnalysisRequest(BaseModel):
+    image_data_url: str
     profile: Optional[dict] = None
     report_text: Optional[str] = None
 
@@ -143,6 +149,23 @@ def chat(req: ChatRequest):
         raise HTTPException(status_code=502, detail=f"AI generation error: {str(e)}")
 
 
+@app.post("/analyze-food-image", tags=["NutriBot"])
+def analyze_food_image(req: ImageAnalysisRequest):
+    # Step 1: Identify the food from the image using the vision model
+    identified_food = identify_food_from_image(groq_client, req.image_data_url)
+
+    # Step 2: Create a new, specific query for our chat logic
+    new_message = f"Based on my health profile, can I eat this food item: {identified_food}?"
+
+    # Step 3: Create a ChatRequest object to pass to our existing chat function
+    chat_req = ChatRequest(
+        message=new_message,
+        profile=req.profile,
+        report_text=req.report_text
+    )
+
+    # Step 4: Call the existing chat function to get the full analysis
+    return chat(chat_req)
 @app.post("/upload", tags=["Files"])
 async def upload(file: UploadFile = File(...)):
     try:
@@ -191,5 +214,18 @@ async def file_meta(file_id: str):
         raise HTTPException(status_code=500, detail=f"Meta read failed: {e}")
 
 
+@app.post("/test-vision", tags=["Debug"])
+async def test_vision(req: ImageAnalysisRequest):
+    """
+    A temporary endpoint to only test the image recognition part.
+    """
+    print("--- Vision test endpoint called ---")
+    try:
+        food_name = identify_food_from_image(groq_client, req.image_data_url)
+        print(f"Vision model identified: {food_name}")
+        return {"identified_food": food_name}
+    except Exception as e:
+        print(f"An error occurred in the vision test: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 if os.getenv("SERVE_UPLOADS", "true").lower() == "true":
     app.mount("/_uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
