@@ -40,6 +40,46 @@ input[type="number"] {
   box-shadow: 0 0 8px 2px rgba(169, 136, 255, 0.4); /* Purple glow effect */
 }
 
+
+/* --- NEW: Mobile-First Responsive Styles --- */
+
+/* Base styles for the main layout (mobile by default) */
+.main-layout {
+  display: flex;
+  flex-direction: column; /* Stack chat and profile vertically on mobile */
+  padding: 0.5rem;
+  flex: 1;
+  overflow: hidden;
+}
+
+.chat-section {
+  height: 85vh; /* Default height for mobile */
+}
+
+.profile-panel {
+  margin-top: 1rem;
+  height: auto;
+}
+
+/* This applies only to screens WIDER than 768px (tablets and desktops) */
+@media (min-width: 768px) {
+  .main-layout {
+    flex-direction: row; /* Side-by-side layout on larger screens */
+    gap: 16px;
+    padding: 1rem;
+  }
+
+  .chat-section {
+    flex: 1; /* Allow chat to take up the remaining space */
+    height: calc(100vh - 90px);
+  }
+
+  .profile-panel {
+    width: 380px; /* Fixed width for the profile panel on large screens */
+    margin-top: 0;
+    height: calc(100vh - 90px);
+  }
+}
 /* --- NEW: Custom Dark Theme Scrollbar --- */
 
 /* Works for Chrome, Edge, Safari */

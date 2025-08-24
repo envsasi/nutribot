@@ -211,22 +211,14 @@ const closeWelcomeModal = () => setIsWelcomeModalOpen(false);// The empty array 
     </header>
 
     {/* Main Layout Grid */}
-    <div style={{
-        display: "grid",
-        gridTemplateColumns: isProfileOpen ? "1fr 380px" : "1fr 0fr",
-        gap: isProfileOpen ? 16 : 0,
-        padding: '1rem',
-        flex: 1,
-        overflow: 'hidden',
-        height: 'calc(100vh - 80px)'
-    }}>
+    <div className="main-layout">
         {/* Chat column */}
-        <section style={{
-            border: "1px solid #333537", // Darker border
-            backgroundColor: '#1e1f20',   // Dark background
+        <section className="chat-section" style={{
+            border: "1px solid #333537",
+            backgroundColor: '#1e1f20',
             borderRadius: 12,
             padding: 12,
-            display: "flex", // This is crucial for scrolling
+            display: "flex",
             flexDirection: "column",
             overflow: 'hidden'
         }}>
@@ -345,7 +337,13 @@ const closeWelcomeModal = () => setIsWelcomeModalOpen(false);// The empty array 
 
     {/* Profile column is now conditional */}
     {isProfileOpen && (
-      <aside style={{ border: "1px solid #333537", backgroundColor: '#1e1f20', borderRadius: 12, padding: 12, height: "calc(100vh - 90px)", overflowY: "auto" }}>
+      <aside className="profile-panel" style={{
+                border: "1px solid #333537",
+                backgroundColor: '#1e1f20',
+                borderRadius: 12,
+                padding: 12,
+                overflowY: "auto"
+      }}>
     <h3 style={{ marginTop: 0 }}>Your Profile</h3>
     <p style={{ fontSize: 13, color: "#a1a1aa", marginBottom: 20 }}>
         Personalization helps NutriBot tailor eat/avoid lists.
