@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from groq import Groq
 from fastapi.staticfiles import StaticFiles
-import fitz
+from pypdf import PdfReader
 import google.generativeai as genai
 
 from .utils.rules import detect_foods
@@ -190,8 +190,10 @@ async def upload(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"Upload failed: {e}")
 
 
+from pypdf import PdfReader # Make sure to add this import at the top
+
 @app.post("/files/{file_id}/parse", tags=["Files"])
-async def parse_file(file_id: str):
+async def parse_file(file_id: str): # This endpoint should be public
     pattern = os.path.join(UPLOAD_DIR, f"{file_id}.*.json")
     matches = glob.glob(str(pattern))
     if not matches:
@@ -200,20 +202,22 @@ async def parse_file(file_id: str):
     try:
         with open(matches[0], "r", encoding="utf-8") as f:
             meta = json.load(f)
+
         file_path = os.path.join(UPLOAD_DIR, meta.get("stored_filename"))
         if not os.path.exists(file_path):
             raise HTTPException(status_code=404, detail="File not found")
 
+        # NEW: Use pypdf to read the PDF
         text_content = ""
-        with fitz.open(file_path) as doc:
-            for page in doc:
-                text_content += page.get_text()
+        with open(file_path, "rb") as f:
+            reader = PdfReader(f)
+            for page in reader.pages:
+                text_content += page.extract_text() or ""
 
         return {"ok": True, "file_id": file_id, "content": text_content[:4000]}
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to parse file: {str(e)}")
-
-
 @app.get("/files/{file_id}/meta", tags=["Files"])
 async def file_meta(file_id: str):
     pattern = os.path.join(UPLOAD_DIR, f"{file_id}.*.json")
