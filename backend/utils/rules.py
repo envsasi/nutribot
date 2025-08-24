@@ -1,49 +1,40 @@
 import json
 import pathlib
 import re
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Set
 
-# Define the path to the rules file
-DATA = pathlib.Path(__file__).parents[1] / "data" / "foods.json"
+# --- DATASET LOADING ---
 
-# A mapping of common keywords to the canonical condition keys in foods.json
-CONDITION_KEYWORDS = {
-    "migraine": ["migraine", "headache", "head pain"],
-    "type2_diabetes": ["diabetes", "type 2", "type2", "blood sugar"],
-    "hypertension": ["hypertension", "high blood pressure", "high bp"],
-    "acidity": ["acidity", "acid reflux", "heartburn", "gerd"],
-}
+# Path to the main food dataset
+FOOD_DATA_PATH = pathlib.Path(__file__).parents[1] / "data" / "food_data.json"
 
-def _load_rules() -> Dict[str, Any]:
-    """Loads the food rules from the JSON file."""
+
+def _load_json_data(path: pathlib.Path) -> Any:
+    """A helper function to load a JSON file."""
     try:
-        return json.loads(DATA.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"Error loading data from {path}: {e}")
+        return None
 
-def _canonical_key(query: str) -> Optional[str]:
-    """Finds the canonical condition key from a user's query."""
-    q = query.lower()
-    for key, keywords in CONDITION_KEYWORDS.items():
-        for keyword in keywords:
-            if keyword in q:
-                return key
-    return None
 
-def suggest_from_rules(query: str) -> Optional[Dict[str, List[str]]]:
+# Load the entire food dataset into memory when the server starts
+FOOD_DATABASE = _load_json_data(FOOD_DATA_PATH)
+# Create a simple set of all unique 'base_name' values for fast searching
+ALL_FOOD_NAMES: Set[str] = {item['base_name'].lower() for item in FOOD_DATABASE} if FOOD_DATABASE else set()
+
+
+# --- NEW: ADVANCED FOOD DETECTION ---
+
+def detect_foods(user_message: str) -> List[str]:
     """
-    Finds a matching condition from the user query and returns the
-    corresponding rules from foods.json.
+    Finds all known food items from the dataset mentioned in the user's message.
     """
-    rules = _load_rules()
-    key = _canonical_key(query)
-    return rules.get(key) if key else None
+    found_foods = set()  # Use a set to avoid duplicates
 
-def extract_json_block(text: str) -> Optional[str]:
-    """Extracts a JSON block from text, preferring <json> tags."""
-    # Prefer <json>...</json>, else fenced ```json
-    m = re.search(r"<json>(.*?)</json>", text, flags=re.S | re.I)
-    if not m:
-        m = re.search(r"```json(.*?)```", text, flags=re.S | re.I)
+    for food_name in ALL_FOOD_NAMES:
+        # Check if the food name (which can be multi-word) is in the user's message
+        if food_name in user_message.lower():
+            found_foods.add(food_name.capitalize())
 
-    return m.group(1).strip() if m else None
+    return list(found_foods)
